@@ -79,7 +79,7 @@ export async function packProject({
 
   const platform = normalizePlatform(targetPlatform);
   const runtimeArch = normalizeArch(arch, platform);
-  const tmpRoot = path.join(sourceFolder, '.tmp/npm2exe-apps', packageName);
+  const tmpRoot = path.join(sourceFolder, '.temp/npm2exe-apps', packageName);
   const appFolder = path.join(tmpRoot, 'app');
   const runtimeFolder = path.join(tmpRoot, 'runtime');
   const outFolder = path.join(sourceFolder, 'out');
@@ -112,9 +112,9 @@ export async function packProject({
   );
 
   if (platform === 'win') {
-    await packageWith7Zip(path.join(sourceFolder, '.tmp'), outputFile);
+    await packageWith7Zip(path.join(sourceFolder, '.temp'), outputFile);
   } else {
-    const archiveRoot = path.join(sourceFolder, '.tmp');
+    const archiveRoot = path.join(sourceFolder, '.temp');
     const installScript = `./${toPosixPath(path.relative(archiveRoot, path.join(tmpRoot, 'install.sh')))}`;
 
     await packageWithMakeself(archiveRoot, outputFile, installScript);
@@ -171,7 +171,7 @@ async function copyProjectFiles(
     cwd: sourceFolder,
     dot: true,
     onlyFiles: false,
-    ignore: ['.git/**', '.tmp/**', 'out/**', 'node_modules/**']
+    ignore: ['.git/**', '.temp/**', 'out/**', 'node_modules/**']
   }))
     entries.add(item);
 
