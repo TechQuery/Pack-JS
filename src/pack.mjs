@@ -124,13 +124,14 @@ async function copyProjectFiles({ sourceDir, appDir, sourcePkg }) {
     }
   }
 
-  const filePatterns = Array.isArray(sourcePkg.files) ? sourcePkg.files : [];
+  const filePatterns =
+    Array.isArray(sourcePkg.files) && sourcePkg.files.length > 0 ? sourcePkg.files : ['**/*'];
   const matchedFiles = await fg(filePatterns, {
     cwd: sourceDir,
     dot: true,
     onlyFiles: false,
     unique: true,
-    ignore: ['.tmp/**', 'out/**', 'node_modules/**']
+    ignore: ['.git/**', '.tmp/**', 'out/**', 'node_modules/**']
   });
   for (const file of matchedFiles) {
     entries.add(file);
@@ -266,7 +267,7 @@ async function packageWithMakeself(tmpRoot, outputFile) {
     await chmod(headerPath, 0o755);
   }
 
-  await $`${makeselfPath} --target \\$HOME --nocomp ${tmpRoot} ${outputFile} "Pack-JS archive" ./install.sh`;
+  await $`${makeselfPath} --target $HOME --nocomp ${tmpRoot} ${outputFile} "Pack-JS archive" ./install.sh`;
 }
 
 async function packageWith7Zip(tmpRoot, outputFile) {

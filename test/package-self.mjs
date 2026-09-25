@@ -10,40 +10,44 @@ const nodeVersion = process.version;
 const packageName = 'pack-js';
 const fetchBackup = global.fetch;
 
-if (getExtractionCommand('zip', 'win32') !== 'powershell-zip') {
-  throw new Error('Expected Windows ZIP extraction command to use PowerShell');
-}
-if (getExtractionCommand('zip', 'linux') !== 'python-zip') {
-  throw new Error('Expected POSIX ZIP extraction command to use python zipfile');
-}
-if (getExtractionCommand('tar.xz', 'linux') !== 'tar') {
-  throw new Error('Expected tar extraction command for non-zip archives');
-}
-
-global.fetch = async (url) => {
-  if (String(url).includes('/index.json')) {
-    return {
-      ok: true,
-      json: async () => [{ version: 'v22.8.0' }, { version: 'v20.18.0' }]
-    };
-  }
-  return fetchBackup(url);
-};
-const resolvedByEngine = await resolveNodeVersion({ sourcePkg: { engines: { node: '^20' } } });
-if (resolvedByEngine !== 'v20.18.0') {
-  throw new Error(`Unexpected resolved node version: ${resolvedByEngine}`);
-}
-global.fetch = async () => ({ ok: false, status: 503 });
-let fetchErrorCaught = false;
 try {
-  await resolveNodeVersion({ sourcePkg: {} });
-} catch {
-  fetchErrorCaught = true;
+  if (getExtractionCommand('zip', 'win32') !== 'powershell-zip') {
+    throw new Error('Expected Windows ZIP extraction command to use PowerShell');
+  }
+  if (getExtractionCommand('zip', 'linux') !== 'python-zip') {
+    throw new Error('Expected POSIX ZIP extraction command to use python zipfile');
+  }
+  if (getExtractionCommand('tar.xz', 'linux') !== 'tar') {
+    throw new Error('Expected tar extraction command for non-zip archives');
+  }
+
+  global.fetch = async (url) => {
+    if (String(url).includes('/index.json')) {
+      return {
+        ok: true,
+        json: async () => [{ version: 'v22.8.0' }, { version: 'v20.18.0' }]
+      };
+    }
+    return fetchBackup(url);
+  };
+  const resolvedByEngine = await resolveNodeVersion({ sourcePkg: { engines: { node: '^20' } } });
+  if (resolvedByEngine !== 'v20.18.0') {
+    throw new Error(`Unexpected resolved node version: ${resolvedByEngine}`);
+  }
+
+  global.fetch = async () => ({ ok: false, status: 503 });
+  let fetchErrorCaught = false;
+  try {
+    await resolveNodeVersion({ sourcePkg: {} });
+  } catch {
+    fetchErrorCaught = true;
+  }
+  if (!fetchErrorCaught) {
+    throw new Error('Expected resolveNodeVersion to throw when node index fetch fails');
+  }
+} finally {
+  global.fetch = fetchBackup;
 }
-if (!fetchErrorCaught) {
-  throw new Error('Expected resolveNodeVersion to throw when node index fetch fails');
-}
-global.fetch = fetchBackup;
 
 const homeDir = await mkdtemp(path.join(os.tmpdir(), 'pack-js-home-'));
 const originalHome = process.env.HOME;
