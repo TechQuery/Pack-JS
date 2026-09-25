@@ -3,6 +3,7 @@ import fg from 'fast-glob';
 import os from 'node:os';
 import path from 'node:path';
 import semver from 'semver';
+import { spawn } from 'node:child_process';
 import { chmod, cp, mkdir, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
 
 const LOCK_FILES = ['pnpm-lock.yaml', 'yarn.lock', 'package-lock.json', 'npm-shrinkwrap.json'];
@@ -36,6 +37,7 @@ export async function runCli(argv = process.argv.slice(2)) {
 export async function packProject({
   projectDir = process.cwd(),
   arch = process.arch,
+  targetPlatform = process.platform,
   nodeVersion,
   outputName
 } = {}) {
@@ -51,6 +53,7 @@ export async function packProject({
   const appDir = path.join(tmpRoot, 'app');
   const runtimeDir = path.join(tmpRoot, 'runtime');
   const outDir = path.join(sourceDir, 'out');
+  const normalizedPlatform = normalizePlatform(targetPlatform);
 
   await rm(tmpRoot, { recursive: true, force: true });
   await mkdir(appDir, { recursive: true });
@@ -66,19 +69,20 @@ export async function packProject({
   const { extractedNodePath } = await installNodeRuntime({
     version: resolvedVersion,
     runtimeDir,
-    arch: normalizeArch(arch)
+    arch: normalizeArch(arch),
+    targetPlatform: normalizedPlatform
   });
 
-  await createLaunchers({ tmpRoot, sourcePkg, extractedNodePath });
+  await createLaunchers({ tmpRoot, sourcePkg, extractedNodePath, targetPlatform: normalizedPlatform });
   await createPosixInstallScript(tmpRoot);
 
   const outputBaseName = outputName || packageName;
   const outputFile = path.join(
     outDir,
-    process.platform === 'win32' ? `${outputBaseName}.exe` : outputBaseName
+    normalizedPlatform === 'win' ? `${outputBaseName}.exe` : outputBaseName
   );
 
-  if (process.platform === 'win32') {
+  if (normalizedPlatform === 'win') {
     await packageWith7Zip(tmpRoot, outputFile);
   } else {
     await packageWithMakeself(tmpRoot, outputFile);
@@ -99,6 +103,8 @@ function parseArgs(args) {
       options.nodeVersion = args[++i];
     } else if (arg === '--output') {
       options.outputName = args[++i];
+    } else if (arg === '--platform') {
+      options.targetPlatform = args[++i];
     }
   }
   return options;
@@ -184,8 +190,8 @@ export async function resolveNodeVersion({ sourcePkg = {}, overrideVersion } = {
   return latestVersion;
 }
 
-async function installNodeRuntime({ version, runtimeDir, arch }) {
-  const platform = normalizePlatform(process.platform);
+async function installNodeRuntime({ version, runtimeDir, arch, targetPlatform }) {
+  const platform = targetPlatform;
   const extension = platform === 'win' ? 'zip' : platform === 'darwin' ? 'tar.gz' : 'tar.xz';
   const fileName = `node-${version}-${platform}-${arch}.${extension}`;
   const distDirName = `node-${version}-${platform}-${arch}`;
@@ -209,7 +215,7 @@ async function installNodeRuntime({ version, runtimeDir, arch }) {
   return { archivePath, extractedNodePath };
 }
 
-async function createLaunchers({ tmpRoot, sourcePkg, extractedNodePath }) {
+async function createLaunchers({ tmpRoot, sourcePkg, extractedNodePath, targetPlatform }) {
   const binField = sourcePkg.bin;
   if (!binField) {
     return;
@@ -222,7 +228,7 @@ async function createLaunchers({ tmpRoot, sourcePkg, extractedNodePath }) {
 
   const nodeRelativePath = path.relative(tmpRoot, extractedNodePath);
   for (const [name, target] of binEntries) {
-    if (process.platform === 'win32') {
+    if (targetPlatform === 'win') {
       const scriptPath = path.join(tmpRoot, `${name}.cmd`);
       const cmdContent = `@echo off\r\n"%~dp0\\${normalizeToWindows(nodeRelativePath)}" "%~dp0\\app\\${normalizeToWindows(target)}" %*\r\n`;
       await writeFile(scriptPath, cmdContent, 'utf8');
@@ -342,9 +348,10 @@ function normalizeVersion(version) {
 }
 
 function normalizePlatform(platform) {
-  if (platform === 'win32') return 'win';
+  if (platform === 'win32' || platform === 'win') return 'win';
   if (platform === 'darwin') return 'darwin';
-  return 'linux';
+  if (platform === 'linux') return 'linux';
+  throw new Error(`Unsupported platform: ${platform}`);
 }
 
 function normalizeArch(arch) {
@@ -418,11 +425,19 @@ async function resolveInstallerRunner(name) {
 }
 
 async function runCommand(cwd, runner, args) {
-  if (runner.useCorepack) {
-    await $({ cwd })`corepack ${runner.name} ${args}`;
-    return;
-  }
-  await $({ cwd })`${runner.name} ${args}`;
+  const command = runner.useCorepack ? 'corepack' : runner.name;
+  const commandArgs = runner.useCorepack ? [runner.name, ...args] : args;
+  await new Promise((resolve, reject) => {
+    const child = spawn(command, commandArgs, { cwd, stdio: 'inherit' });
+    child.on('error', reject);
+    child.on('exit', (code) => {
+      if (code === 0) {
+        resolve();
+        return;
+      }
+      reject(new Error(`Command failed: ${command} ${commandArgs.join(' ')}`));
+    });
+  });
 }
 
 async function findExistingPath(paths) {
