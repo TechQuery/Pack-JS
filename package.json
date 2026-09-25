@@ -1,19 +1,20 @@
 {
-  "name": "pack-js",
-  "version": "1.0.0",
+  "name": "npm2exe",
+  "version": "0.1.0",
   "description": "Pack a JavaScript local project to a Portable Execution.",
   "type": "module",
   "bin": {
-    "pack-js": "./bin/pack-js.mjs"
+    "npm2exe": "./bin/npm2exe.mjs"
   },
   "files": [
     "bin",
-    "src",
+    "dist",
     "README.md",
     "LICENSE"
   ],
   "scripts": {
-    "test": "node ./test/package-self.mjs"
+    "build": "tsc -p tsconfig.json",
+    "test": "tsx src/ ."
   },
   "repository": {
     "type": "git",
@@ -28,12 +29,17 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
+    "7zip-bin-full": "^26.3.1",
+    "commander-jsx": "^0.7.3",
     "fast-glob": "^3.3.3",
     "semver": "^7.8.5",
     "zx": "^8.8.5"
   },
   "devDependencies": {
-    "@types/node": "^26.6.2"
+    "@types/node": "^26.6.2",
+    "@types/semver": "^7.8.0",
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2"
   },
   "engines": {
     "node": ">=20"
