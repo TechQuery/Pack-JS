@@ -186,10 +186,11 @@ async function createLaunchers({ tmpRoot, sourcePkg, extractedNodePath }) {
       ? [[sourcePkg.name, binField]]
       : Object.entries(binField);
 
+  const nodeRelativePath = path.relative(tmpRoot, extractedNodePath);
   for (const [name, target] of binEntries) {
     if (process.platform === 'win32') {
       const scriptPath = path.join(tmpRoot, `${name}.cmd`);
-      const cmdContent = `@echo off\r\n"%~dp0\\${normalizeToWindows(extractedNodePath)}" "%~dp0\\app\\${normalizeToWindows(target)}" %*\r\n`;
+      const cmdContent = `@echo off\r\n"%~dp0\\${normalizeToWindows(nodeRelativePath)}" "%~dp0\\app\\${normalizeToWindows(target)}" %*\r\n`;
       await writeFile(scriptPath, cmdContent, 'utf8');
     } else {
       const scriptPath = path.join(tmpRoot, name);
@@ -309,12 +310,16 @@ function toPosixPath(filePath) {
 }
 
 function normalizeToWindows(filePath) {
-  return filePath.split(path.sep).join('\\\\');
+  return filePath.replaceAll('/', '\\');
 }
 
 async function commandExists(command) {
   try {
-    await $`command -v ${command}`;
+    if (process.platform === 'win32') {
+      await $`where ${command}`;
+    } else {
+      await $`command -v ${command}`;
+    }
     return true;
   } catch {
     return false;
