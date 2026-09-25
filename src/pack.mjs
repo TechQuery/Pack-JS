@@ -6,6 +6,7 @@ import semver from 'semver';
 import { chmod, cp, mkdir, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
 
 const LOCK_FILES = ['pnpm-lock.yaml', 'yarn.lock', 'package-lock.json', 'npm-shrinkwrap.json'];
+const MAKESELF_COMMIT = '9f5fd3f77eea3f5e262745c0f3899d761a5fd5f7';
 const INSTALLERS = [
   { name: 'pnpm', cmd: ['install', '--prod', '--frozen-lockfile'] },
   { name: 'yarn', cmd: ['install', '--production', '--frozen-lockfile'] },
@@ -146,7 +147,7 @@ async function resolveNodeVersion(sourcePkg, overrideVersion) {
   const range = sourcePkg?.engines?.node;
   if (range) {
     const versions = index.map((entry) => entry.version);
-    const matched = versions.find((version) => semver.satisfies(semver.coerce(version), range));
+    const matched = semver.maxSatisfying(versions, range);
     if (matched) {
       return matched;
     }
@@ -222,11 +223,11 @@ async function packageWithMakeself(tmpRoot, outputFile) {
   if (!(await pathExists(makeselfPath)) || !(await pathExists(headerPath))) {
     await mkdir(makeselfDir, { recursive: true });
     await downloadFile(
-      'https://raw.githubusercontent.com/megastep/makeself/master/makeself.sh',
+      `https://raw.githubusercontent.com/megastep/makeself/${MAKESELF_COMMIT}/makeself.sh`,
       makeselfPath
     );
     await downloadFile(
-      'https://raw.githubusercontent.com/megastep/makeself/master/makeself-header.sh',
+      `https://raw.githubusercontent.com/megastep/makeself/${MAKESELF_COMMIT}/makeself-header.sh`,
       headerPath
     );
     await chmod(makeselfPath, 0o755);
@@ -238,7 +239,7 @@ async function packageWithMakeself(tmpRoot, outputFile) {
 
 async function packageWith7Zip(tmpRoot, outputFile) {
   const sevenZipArchive = `${outputFile}.7z`;
-  await $`7z a -t7z -mx=9 ${sevenZipArchive} ${tmpRoot}`;
+  await $({ cwd: tmpRoot })`7z a -t7z -mx=9 ${sevenZipArchive} .`;
 
   const sfxPath =
     (await findExistingPath([
@@ -318,7 +319,7 @@ async function commandExists(command) {
     if (process.platform === 'win32') {
       await $`where ${command}`;
     } else {
-      await $`command -v ${command}`;
+      await $`which ${command}`;
     }
     return true;
   } catch {
