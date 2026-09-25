@@ -165,7 +165,7 @@ async function installProductionDependencies(appDir) {
   throw new Error('No package manager succeeded for production dependency installation');
 }
 
-async function resolveNodeVersion(sourcePkg, overrideVersion) {
+export async function resolveNodeVersion(sourcePkg, overrideVersion) {
   if (overrideVersion) {
     return normalizeVersion(overrideVersion);
   }
@@ -263,11 +263,12 @@ async function packageWithMakeself(tmpRoot, outputFile) {
     await chmod(headerPath, 0o755);
   }
 
-  await $`${makeselfPath} --target '$HOME' --nocomp ${tmpRoot} ${outputFile} "Pack-JS archive" ./install.sh`;
+  await $`${makeselfPath} --target ${os.homedir()} --nocomp ${tmpRoot} ${outputFile} "Pack-JS archive" ./install.sh`;
 }
 
 async function packageWith7Zip(tmpRoot, outputFile) {
-  const sevenZipArchive = `${outputFile}.7z`;
+  const sevenZipArchive = path.join(os.tmpdir(), `${path.basename(outputFile)}.7z`);
+  await rm(sevenZipArchive, { force: true });
   await $({ cwd: tmpRoot })`7z a -t7z -mx=9 ${sevenZipArchive} .`;
 
   const sfxPath =
@@ -289,6 +290,8 @@ async function packageWith7Zip(tmpRoot, outputFile) {
     'utf8'
   );
   await $`cmd /c copy /b ${sfxPath} + ${configPath} + ${sevenZipArchive} ${outputFile}`;
+  await rm(sevenZipArchive, { force: true });
+  await rm(configPath, { force: true });
 }
 
 async function fetchNodeIndex() {
