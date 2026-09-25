@@ -11,5 +11,5 @@ Options:
 - `--project <dir>` source project directory (default current directory)
 - `--node-version <version>` specific runtime version (for example `v22.18.0`)
 - `--platform <linux|darwin|win|win32>` target platform (default current platform)
-- `--arch <x64|arm64|x86|ia32>` target runtime architecture (`ia32` maps to `x86`)
+- `--arch <x64|arm64|arm|x86|ia32>` target runtime architecture (`arm` maps to `armv7l`, `ia32` maps to `x86`)
 - `--output <name>` output bundle file name (default package name; Windows appends `.exe`)
