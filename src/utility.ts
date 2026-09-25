@@ -27,5 +27,5 @@ export const toPosixPath = (filePath: string): string => filePath.split(path.sep
 
 export const toWindowsPath = (filePath: string): string => filePath.replaceAll('/', '\\');
 
-export const getExtractionCommand = (extension: string, platform: TargetPlatform): 'zip' | 'tar' =>
+export const getExtractionCommand = (extension: string): 'zip' | 'tar' =>
   extension === 'zip' ? 'zip' : 'tar';
