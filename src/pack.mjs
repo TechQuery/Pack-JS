@@ -59,7 +59,10 @@ export async function packProject({
   await copyProjectFiles({ sourceDir, appDir, sourcePkg });
   await installProductionDependencies(appDir);
 
-  const resolvedVersion = await resolveNodeVersion(sourcePkg, nodeVersion);
+  const resolvedVersion = await resolveNodeVersion({
+    sourcePkg,
+    overrideVersion: nodeVersion
+  });
   const { extractedNodePath } = await installNodeRuntime({
     version: resolvedVersion,
     runtimeDir,
@@ -149,23 +152,19 @@ async function installProductionDependencies(appDir) {
       }
       continue;
     }
-    try {
-      for (const args of installer.attempts) {
-        try {
-          await $({ cwd: appDir })`${runner} ${args}`;
-          return;
-        } catch {
-          // continue fallback attempts for this package manager
-        }
+    for (const args of installer.attempts) {
+      try {
+        await runCommand(appDir, runner, args);
+        return;
+      } catch {
+        // continue fallback attempts for this package manager
       }
-    } catch {
-      // continue fallback installers
     }
   }
   throw new Error('No package manager succeeded for production dependency installation');
 }
 
-export async function resolveNodeVersion(sourcePkg, overrideVersion) {
+export async function resolveNodeVersion({ sourcePkg = {}, overrideVersion } = {}) {
   if (overrideVersion) {
     return normalizeVersion(overrideVersion);
   }
@@ -178,7 +177,11 @@ export async function resolveNodeVersion(sourcePkg, overrideVersion) {
       return matched;
     }
   }
-  return index[0]?.version;
+  const latestVersion = index[0]?.version;
+  if (!latestVersion) {
+    throw new Error('No node versions available from nodejs.org index');
+  }
+  return latestVersion;
 }
 
 async function installNodeRuntime({ version, runtimeDir, arch }) {
@@ -193,9 +196,10 @@ async function installNodeRuntime({ version, runtimeDir, arch }) {
   await rm(runtimeDir, { recursive: true, force: true });
   await mkdir(runtimeDir, { recursive: true });
 
-  if (extension === 'zip' && process.platform === 'win32') {
+  const extraction = getExtractionCommand(extension, process.platform);
+  if (extraction === 'powershell-zip') {
     await $`powershell -NoProfile -Command Expand-Archive -Path ${archivePath} -DestinationPath ${runtimeDir} -Force`;
-  } else if (extension === 'zip') {
+  } else if (extraction === 'python-zip') {
     await $`python -m zipfile -e ${archivePath} ${runtimeDir}`;
   } else {
     await $`tar -xf ${archivePath} -C ${runtimeDir}`;
@@ -263,7 +267,7 @@ async function packageWithMakeself(tmpRoot, outputFile) {
     await chmod(headerPath, 0o755);
   }
 
-  await $`${makeselfPath} --target ${os.homedir()} --nocomp ${tmpRoot} ${outputFile} "Pack-JS archive" ./install.sh`;
+  await $`${makeselfPath} --target \\$HOME --nocomp ${tmpRoot} ${outputFile} "Pack-JS archive" ./install.sh`;
 }
 
 async function packageWith7Zip(tmpRoot, outputFile) {
@@ -347,6 +351,9 @@ function normalizeArch(arch) {
   if (arch === 'x64' || arch === 'arm64' || arch === 'x86') {
     return arch;
   }
+  if (arch === 'arm') {
+    return 'armv7l';
+  }
   if (arch === 'ia32') {
     return 'x86';
   }
@@ -359,6 +366,16 @@ function toPosixPath(filePath) {
 
 function normalizeToWindows(filePath) {
   return filePath.replaceAll('/', '\\');
+}
+
+export function getExtractionCommand(extension, platform) {
+  if (extension === 'zip' && platform === 'win32') {
+    return 'powershell-zip';
+  }
+  if (extension === 'zip') {
+    return 'python-zip';
+  }
+  return 'tar';
 }
 
 async function commandExists(command) {
@@ -392,12 +409,20 @@ async function resolveInstallersByLockFile(appDir) {
 
 async function resolveInstallerRunner(name) {
   if (await commandExists(name)) {
-    return [name];
+    return { useCorepack: false, name };
   }
   if ((name === 'pnpm' || name === 'yarn') && (await commandExists('corepack'))) {
-    return ['corepack', name];
+    return { useCorepack: true, name };
   }
   return null;
+}
+
+async function runCommand(cwd, runner, args) {
+  if (runner.useCorepack) {
+    await $({ cwd })`corepack ${runner.name} ${args}`;
+    return;
+  }
+  await $({ cwd })`${runner.name} ${args}`;
 }
 
 async function findExistingPath(paths) {

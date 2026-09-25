@@ -3,12 +3,22 @@ import os from 'node:os';
 import { existsSync } from 'node:fs';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { $ } from 'zx';
-import { packProject, resolveNodeVersion } from '../src/pack.mjs';
+import { getExtractionCommand, packProject, resolveNodeVersion } from '../src/pack.mjs';
 
 const projectDir = path.resolve(process.cwd());
 const nodeVersion = process.version;
 const packageName = 'pack-js';
 const fetchBackup = global.fetch;
+
+if (getExtractionCommand('zip', 'win32') !== 'powershell-zip') {
+  throw new Error('Expected Windows ZIP extraction command to use PowerShell');
+}
+if (getExtractionCommand('zip', 'linux') !== 'python-zip') {
+  throw new Error('Expected POSIX ZIP extraction command to use python zipfile');
+}
+if (getExtractionCommand('tar.xz', 'linux') !== 'tar') {
+  throw new Error('Expected tar extraction command for non-zip archives');
+}
 
 global.fetch = async (url) => {
   if (String(url).includes('/index.json')) {
@@ -19,14 +29,14 @@ global.fetch = async (url) => {
   }
   return fetchBackup(url);
 };
-const resolvedByEngine = await resolveNodeVersion({ engines: { node: '^20' } });
+const resolvedByEngine = await resolveNodeVersion({ sourcePkg: { engines: { node: '^20' } } });
 if (resolvedByEngine !== 'v20.18.0') {
   throw new Error(`Unexpected resolved node version: ${resolvedByEngine}`);
 }
 global.fetch = async () => ({ ok: false, status: 503 });
 let fetchErrorCaught = false;
 try {
-  await resolveNodeVersion({});
+  await resolveNodeVersion({ sourcePkg: {} });
 } catch {
   fetchErrorCaught = true;
 }
