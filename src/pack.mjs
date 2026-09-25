@@ -69,7 +69,7 @@ export async function packProject({
   const { extractedNodePath } = await installNodeRuntime({
     version: resolvedVersion,
     runtimeDir,
-    arch: normalizeArch(arch),
+    arch: normalizeArch(arch, normalizedPlatform),
     targetPlatform: normalizedPlatform
   });
 
@@ -202,14 +202,7 @@ async function installNodeRuntime({ version, runtimeDir, arch, targetPlatform })
   await rm(runtimeDir, { recursive: true, force: true });
   await mkdir(runtimeDir, { recursive: true });
 
-  const extraction = getExtractionCommand(extension, process.platform);
-  if (extraction === 'powershell-zip') {
-    await $`powershell -NoProfile -Command Expand-Archive -Path ${archivePath} -DestinationPath ${runtimeDir} -Force`;
-  } else if (extraction === 'python-zip') {
-    await $`python -m zipfile -e ${archivePath} ${runtimeDir}`;
-  } else {
-    await $`tar -xf ${archivePath} -C ${runtimeDir}`;
-  }
+  await extractArchive({ extension, archivePath, runtimeDir });
 
   const extractedNodePath = await resolveNodeExecutablePath(runtimeDir, distDirName, platform);
   return { archivePath, extractedNodePath };
@@ -354,14 +347,23 @@ function normalizePlatform(platform) {
   throw new Error(`Unsupported platform: ${platform}`);
 }
 
-function normalizeArch(arch) {
-  if (arch === 'x64' || arch === 'arm64' || arch === 'x86') {
+function normalizeArch(arch, targetPlatform) {
+  if (arch === 'x64' || arch === 'arm64') {
     return arch;
   }
   if (arch === 'arm') {
     return 'armv7l';
   }
+  if (arch === 'x86') {
+    if (targetPlatform !== 'win') {
+      throw new Error('x86 is only supported for Windows targets');
+    }
+    return arch;
+  }
   if (arch === 'ia32') {
+    if (targetPlatform !== 'win') {
+      throw new Error('ia32 is only supported for Windows targets');
+    }
     return 'x86';
   }
   throw new Error(`Unsupported architecture: ${arch}`);
@@ -383,6 +385,29 @@ export function getExtractionCommand(extension, platform) {
     return 'python-zip';
   }
   return 'tar';
+}
+
+async function extractArchive({ extension, archivePath, runtimeDir }) {
+  const extraction = getExtractionCommand(extension, process.platform);
+  if (extraction === 'powershell-zip') {
+    await $`powershell -NoProfile -Command Expand-Archive -Path ${archivePath} -DestinationPath ${runtimeDir} -Force`;
+    return;
+  }
+  if (extraction === 'python-zip') {
+    if (await commandExists('python')) {
+      await $`python -m zipfile -e ${archivePath} ${runtimeDir}`;
+      return;
+    }
+    if (await commandExists('unzip')) {
+      await $`unzip -q -o ${archivePath} -d ${runtimeDir}`;
+      return;
+    }
+    throw new Error('ZIP extraction requires python or unzip');
+  }
+  if (!(await commandExists('tar'))) {
+    throw new Error('tar is required for extracting node runtime archives');
+  }
+  await $`tar -xf ${archivePath} -C ${runtimeDir}`;
 }
 
 async function commandExists(command) {
