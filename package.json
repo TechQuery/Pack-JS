@@ -50,6 +50,7 @@
   "scripts": {
     "build": "pkgroll",
     "test": "npm run build  &&  tsx src/ .  &&  out/npm2exe  &&  ~/npm2exe -h",
+    "test-win": "npm run build  &&  tsx src/ .  &&  out\\npm2exe.exe -y  &&  %USERPROFILE%\\npm2exe -h",
     "prepublishOnly": "npm test"
   }
 }

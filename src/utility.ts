@@ -29,3 +29,19 @@ export const toWindowsPath = (filePath: string): string => filePath.replaceAll('
 
 export const getExtractionCommand = (extension: string): 'zip' | 'tar' =>
   extension === 'zip' ? 'zip' : 'tar';
+
+export async function findLatestReleaseAsset(repository: string, pattern: RegExp) {
+  const response = await fetch(`https://api.github.com/repos/${repository}/releases/latest`, {
+    headers: { Accept: 'application/vnd.github+json' }
+  });
+  if (!response.ok) throw new Error(`Failed to fetch ${repository} release: ${response.status}`);
+
+  const release = (await response.json()) as {
+    assets?: Record<'name' | 'browser_download_url', string>[];
+  };
+  const asset = release.assets?.find(({ name }) => pattern.test(name));
+
+  if (!asset) throw new Error(`No asset matching ${pattern} in ${repository} release`);
+
+  return asset;
+}

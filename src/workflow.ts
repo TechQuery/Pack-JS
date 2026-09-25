@@ -1,12 +1,12 @@
-import { spawn } from 'node:child_process';
 import os from 'node:os';
 import path from 'node:path';
-import { $, fs } from 'zx';
+import { $, fs, usePowerShell } from 'zx';
 import fg from 'fast-glob';
 import semver from 'semver';
 import {
   LOCK_FILES,
   TargetPlatform,
+  findLatestReleaseAsset,
   getExtractionCommand,
   normalizeArch,
   normalizePlatform,
@@ -15,8 +15,16 @@ import {
   toWindowsPath
 } from './utility.js';
 
-const MAKSELF_RELEASES_URL =
-  'https://api.github.com/repos/megastep/makeself/releases/latest';
+if (process.platform === 'win32')
+  if (typeof $.shell === 'string')
+    // zx only sets `$.shell` to a path when it finds bash on PATH
+    // zx's default `$'...'` quoting loses backslashes of Windows paths when passed to MSYS bash
+    $.quote = arg => `'${arg.replace(/'/g, `'\\''`)}'`;
+  else {
+    usePowerShell();
+    // PowerShell can't invoke a quoted executable path without the call operator
+    $.prefix = '& ';
+  }
 
 const INSTALLERS = [
   {
@@ -226,7 +234,7 @@ async function resolveInstallersByLockFile(appFolder: string) {
 async function commandExists(command: string): Promise<boolean> {
   try {
     if (process.platform === 'win32') {
-      await $`where ${command}`;
+      await $`where.exe ${command}`;
     } else {
       await $`which ${command}`;
     }
@@ -250,16 +258,10 @@ const runCommand = async (
   args: readonly string[],
   cwd: string
 ) =>
-  new Promise<void>((resolve, reject) => {
-    const child = spawn(runner.command, [...runner.args, ...args], {
-      cwd,
-      stdio: 'inherit'
-    });
-    child.on('error', reject);
-    child.on('exit', code =>
-      code === 0 ? resolve() : reject(new Error(`${runner.command} failed`))
-    );
-  });
+  $({
+    cwd,
+    stdio: 'inherit'
+  })`${runner.command} ${[...runner.args, ...args]}`;
 
 async function installNodeRuntime({
   version,
@@ -382,8 +384,14 @@ set "NODE_PATH=%~dp0${toWindowsPath(nodeModulesRelativePath)};%NODE_PATH%"
 "%~dp0${toWindowsPath(nodeRelativePath)}" "%~dp0${toWindowsPath(targetRelativePath)}" %*
 `.replace(/\n/g, '\r\n')
       );
-      continue;
     }
+
+    const nodeModulesPath = `$ROOT_DIR/${toPosixPath(nodeModulesRelativePath)}`;
+    // Windows node.exe expects native paths joined by `;` in NODE_PATH
+    const nodePathValue =
+      platform === 'win'
+        ? `$(cygpath -w "${nodeModulesPath}")\${NODE_PATH:+;$NODE_PATH}`
+        : `${nodeModulesPath}\${NODE_PATH:+:$NODE_PATH}`;
 
     const scriptPath = path.join(archiveRoot, name);
     await fs.outputFile(
@@ -391,7 +399,7 @@ set "NODE_PATH=%~dp0${toWindowsPath(nodeModulesRelativePath)};%NODE_PATH%"
       `#!/bin/sh
 ROOT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
 export PATH="$ROOT_DIR/${toPosixPath(runtimeBinRelativePath)}:$PATH"
-export NODE_PATH="$ROOT_DIR/${toPosixPath(nodeModulesRelativePath)}\${NODE_PATH:+:$NODE_PATH}"
+export NODE_PATH="${nodePathValue}"
 exec "$ROOT_DIR/${toPosixPath(nodeRelativePath)}" "$ROOT_DIR/${toPosixPath(targetRelativePath)}" "$@"
 `
     );
@@ -417,20 +425,10 @@ async function installMakeself() {
 
   await fs.ensureDir(makeselfFolder);
 
-  const response = await fetch(MAKSELF_RELEASES_URL, {
-    headers: { Accept: 'application/vnd.github+json' }
-  });
-  if (!response.ok)
-    throw new Error(`Failed to fetch Makeself release: ${response.status}`);
-
-  const release = (await response.json()) as {
-    assets?: Record<'name' | 'browser_download_url', string>[];
-  };
-  const asset = release.assets?.find(({ name }) =>
-    /^makeself-.+\.run$/.test(name)
+  const asset = await findLatestReleaseAsset(
+    'megastep/makeself',
+    /^makeself-.+\.run$/
   );
-  if (!asset) throw new Error('Makeself release .run asset not found');
-
   const archivePath = path.join(os.tmpdir(), asset.name);
 
   await downloadFile(asset.browser_download_url, archivePath);
@@ -458,19 +456,55 @@ async function packageWithMakeself(
   await $`${makeselfPath} --nocomp --target '$HOME' ${tmpRoot} ${outputFile} "npm2exe bundle" ${installScript}`;
 }
 
+async function installSFXModule() {
+  const { path7z } = await import('7zip-bin-full');
+  const sfxFolder = path.join(os.tmpdir(), 'npm2exe-7zip');
+  const sfxPath = path.join(sfxFolder, '7zSD.sfx');
+
+  if (await fs.pathExists(sfxPath)) return sfxPath;
+
+  // SFX modules for installers ship in the LZMA SDK
+  const asset = await findLatestReleaseAsset('ip7z/7zip', /^lzma\d+\.7z$/);
+  const archivePath = path.join(os.tmpdir(), asset.name);
+
+  await downloadFile(asset.browser_download_url, archivePath);
+  await $`${path7z} e ${archivePath} ${`-o${sfxFolder}`} bin/7zSD.sfx -y`;
+
+  return sfxPath;
+}
+
 async function packageWith7Zip(tmpRoot: string, outputFile: string) {
   const { path7z } = await import('7zip-bin-full');
-  const sfxConfigPath = path.join(os.tmpdir(), 'npm2exe-sfx-config.txt');
+  const sfxPath = await installSFXModule();
+  const archivePath = path.join(os.tmpdir(), 'npm2exe-archive.7z');
 
+  // 7zSD.sfx extracts to a temporary folder, runs this script there, then removes the folder
   await fs.outputFile(
-    sfxConfigPath,
-    `;!@Install@!UTF-8!
-InstallPath="%USERPROFILE%"
-;!@InstallEnd@!
-`
+    path.join(tmpRoot, 'install.cmd'),
+    `@echo off
+robocopy "%~dp0." "%USERPROFILE%" /E /XF install.cmd /NFL /NDL /NJH /NJS
+if %ERRORLEVEL% GEQ 8 exit /b %ERRORLEVEL%
+echo Package extracted to %USERPROFILE%
+exit /b 0
+`.replace(/\n/g, '\r\n')
   );
-  await fs.remove(outputFile);
+  await fs.remove(archivePath);
   await $({
     cwd: tmpRoot
-  })`${path7z} a -t7z -mx=9 -sfx -sfxconfig ${sfxConfigPath} ${outputFile} .`;
+  })`${path7z} a -t7z -mx=9 ${archivePath} .`;
+
+  const config = `;!@Install@!UTF-8!
+Title="${path.basename(outputFile, '.exe')}"
+Directory=""
+RunProgram="cmd.exe /c install.cmd"
+;!@InstallEnd@!
+`;
+  return fs.outputFile(
+    outputFile,
+    Buffer.concat([
+      await fs.readFile(sfxPath),
+      Buffer.from(config),
+      await fs.readFile(archivePath)
+    ])
+  );
 }
