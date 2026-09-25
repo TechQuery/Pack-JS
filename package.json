@@ -2,15 +2,29 @@
   "name": "pack-js",
   "version": "1.0.0",
   "description": "Pack a JavaScript local project to a Portable Execution.",
-  "main": "index.js",
+  "type": "module",
+  "bin": {
+    "pack-js": "./bin/pack-js.mjs"
+  },
+  "files": [
+    "bin",
+    "src",
+    "README.md",
+    "LICENSE"
+  ],
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "node ./test/package-self.mjs"
   },
   "repository": {
     "type": "git",
     "url": "http://localhost:26831/TechQuery/Pack-JS"
   },
-  "keywords": [],
+  "keywords": [
+    "pack",
+    "portable",
+    "zx",
+    "cli"
+  ],
   "author": "",
   "license": "ISC",
   "dependencies": {
@@ -20,5 +34,9 @@
   },
   "devDependencies": {
     "@types/node": "^26.6.2"
-  }
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "packageManager": "pnpm@12.6.0"
 }
