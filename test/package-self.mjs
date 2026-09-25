@@ -7,29 +7,32 @@ import { packProject } from '../src/pack.mjs';
 
 const projectDir = path.resolve(process.cwd());
 const nodeVersion = process.version;
+const packageName = 'pack-js';
 
 const result = await packProject({
   projectDir,
-  nodeVersion,
-  outputName: 'pack-js-test'
+  nodeVersion
 });
 
 if (!existsSync(result.outputFile)) {
   throw new Error(`Expected output not found: ${result.outputFile}`);
 }
+if (!result.outputFile.endsWith(process.platform === 'win32' ? `${packageName}.exe` : packageName)) {
+  throw new Error(`Unexpected default output name: ${result.outputFile}`);
+}
 
 if (process.platform !== 'win32') {
-  const extractDir = await mkdtemp(path.join(os.tmpdir(), 'pack-js-test-'));
+  const homeDir = await mkdtemp(path.join(os.tmpdir(), 'pack-js-home-'));
   try {
-    await $`sh ${result.outputFile} --target ${extractDir} --noexec`;
-    if (!existsSync(path.join(extractDir, 'app', 'package.json'))) {
+    await $({ env: { ...process.env, HOME: homeDir } })`sh ${result.outputFile} --noexec`;
+    if (!existsSync(path.join(homeDir, 'app', 'package.json'))) {
       throw new Error('Extracted package.json not found in app directory');
     }
-    if (!existsSync(path.join(extractDir, 'pack-js'))) {
+    if (!existsSync(path.join(homeDir, packageName))) {
       throw new Error('Launcher script not found in extracted package');
     }
   } finally {
-    await rm(extractDir, { recursive: true, force: true });
+    await rm(homeDir, { recursive: true, force: true });
   }
 }
 

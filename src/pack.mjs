@@ -8,9 +8,24 @@ import { chmod, cp, mkdir, readdir, readFile, rm, stat, writeFile } from 'node:f
 const LOCK_FILES = ['pnpm-lock.yaml', 'yarn.lock', 'package-lock.json', 'npm-shrinkwrap.json'];
 const MAKESELF_COMMIT = '9f5fd3f77eea3f5e262745c0f3899d761a5fd5f7';
 const INSTALLERS = [
-  { name: 'pnpm', cmd: ['install', '--prod', '--frozen-lockfile'] },
-  { name: 'yarn', cmd: ['install', '--production', '--frozen-lockfile'] },
-  { name: 'npm', cmd: ['install', '--omit=dev'] }
+  {
+    name: 'pnpm',
+    attempts: [
+      ['install', '--prod', '--frozen-lockfile', '--package-import-method=copy'],
+      ['install', '--prod', '--package-import-method=copy']
+    ]
+  },
+  {
+    name: 'yarn',
+    attempts: [
+      ['install', '--production', '--frozen-lockfile'],
+      ['install', '--production']
+    ]
+  },
+  {
+    name: 'npm',
+    attempts: [['install', '--omit=dev']]
+  }
 ];
 
 export async function runCli(argv = process.argv.slice(2)) {
@@ -125,13 +140,24 @@ async function copyProjectFiles({ sourceDir, appDir, sourcePkg }) {
 }
 
 async function installProductionDependencies(appDir) {
-  for (const installer of INSTALLERS) {
-    if (!(await commandExists(installer.name))) {
+  const installers = await resolveInstallersByLockFile(appDir);
+  for (const installer of installers) {
+    const runner = await resolveInstallerRunner(installer.name);
+    if (!runner) {
+      if (installers.length === 1) {
+        throw new Error(`${installer.name} is required for the detected lock file`);
+      }
       continue;
     }
     try {
-      await $({ cwd: appDir })`${installer.name} ${installer.cmd}`;
-      return;
+      for (const args of installer.attempts) {
+        try {
+          await $({ cwd: appDir })`${runner} ${args}`;
+          return;
+        } catch {
+          // continue fallback attempts for this package manager
+        }
+      }
     } catch {
       // continue fallback installers
     }
@@ -140,10 +166,10 @@ async function installProductionDependencies(appDir) {
 }
 
 async function resolveNodeVersion(sourcePkg, overrideVersion) {
-  const index = await fetchNodeIndex();
   if (overrideVersion) {
     return normalizeVersion(overrideVersion);
   }
+  const index = await fetchNodeIndex();
   const range = sourcePkg?.engines?.node;
   if (range) {
     const versions = index.map((entry) => entry.version);
@@ -159,6 +185,7 @@ async function installNodeRuntime({ version, runtimeDir, arch }) {
   const platform = normalizePlatform(process.platform);
   const extension = platform === 'win' ? 'zip' : platform === 'darwin' ? 'tar.gz' : 'tar.xz';
   const fileName = `node-${version}-${platform}-${arch}.${extension}`;
+  const distDirName = `node-${version}-${platform}-${arch}`;
   const archiveUrl = `https://nodejs.org/dist/${version}/${fileName}`;
   const archivePath = path.join(os.tmpdir(), fileName);
 
@@ -166,13 +193,15 @@ async function installNodeRuntime({ version, runtimeDir, arch }) {
   await rm(runtimeDir, { recursive: true, force: true });
   await mkdir(runtimeDir, { recursive: true });
 
-  if (extension === 'zip') {
+  if (extension === 'zip' && process.platform === 'win32') {
+    await $`powershell -NoProfile -Command Expand-Archive -Path ${archivePath} -DestinationPath ${runtimeDir} -Force`;
+  } else if (extension === 'zip') {
     await $`python -m zipfile -e ${archivePath} ${runtimeDir}`;
   } else {
     await $`tar -xf ${archivePath} -C ${runtimeDir}`;
   }
 
-  const extractedNodePath = await findNodeExecutable(runtimeDir, platform);
+  const extractedNodePath = await resolveNodeExecutablePath(runtimeDir, distDirName, platform);
   return { archivePath, extractedNodePath };
 }
 
@@ -234,7 +263,7 @@ async function packageWithMakeself(tmpRoot, outputFile) {
     await chmod(headerPath, 0o755);
   }
 
-  await $`${makeselfPath} --target ~ --nocomp ${tmpRoot} ${outputFile} "Pack-JS archive" ./install.sh`;
+  await $`${makeselfPath} --target '$HOME' --nocomp ${tmpRoot} ${outputFile} "Pack-JS archive" ./install.sh`;
 }
 
 async function packageWith7Zip(tmpRoot, outputFile) {
@@ -244,7 +273,9 @@ async function packageWith7Zip(tmpRoot, outputFile) {
   const sfxPath =
     (await findExistingPath([
       'C:/Program Files/7-Zip/7z.sfx',
-      'C:/Program Files/7-Zip/7zSD.sfx'
+      'C:/Program Files/7-Zip/7zSD.sfx',
+      'C:/Program Files (x86)/7-Zip/7z.sfx',
+      'C:/Program Files (x86)/7-Zip/7zSD.sfx'
     ])) || '';
 
   if (!sfxPath) {
@@ -277,12 +308,25 @@ async function downloadFile(url, destination) {
   await writeFile(destination, data);
 }
 
-async function findNodeExecutable(runtimeDir, platform) {
+async function resolveNodeExecutablePath(runtimeDir, distDirName, platform) {
   const binaryName = platform === 'win' ? 'node.exe' : 'node';
+  const expected = distDirName
+    ? path.join(
+        runtimeDir,
+        distDirName,
+        ...(platform === 'win' ? [binaryName] : ['bin', binaryName])
+      )
+    : null;
+
+  if (expected && (await pathExists(expected))) {
+    return expected;
+  }
+
   const candidates = await fg(`**/${binaryName}`, { cwd: runtimeDir, absolute: true, onlyFiles: true });
   if (!candidates.length) {
     throw new Error('Node binary not found in extracted runtime');
   }
+  candidates.sort();
   return candidates[0];
 }
 
@@ -297,7 +341,7 @@ function normalizePlatform(platform) {
 }
 
 function normalizeArch(arch) {
-  if (arch === 'x64' || arch === 'arm64') {
+  if (arch === 'x64' || arch === 'arm64' || arch === 'x86') {
     return arch;
   }
   if (arch === 'ia32') {
@@ -325,6 +369,32 @@ async function commandExists(command) {
   } catch {
     return false;
   }
+}
+
+async function resolveInstallersByLockFile(appDir) {
+  if (await pathExists(path.join(appDir, 'pnpm-lock.yaml'))) {
+    return [INSTALLERS[0]];
+  }
+  if (await pathExists(path.join(appDir, 'yarn.lock'))) {
+    return [INSTALLERS[1]];
+  }
+  if (
+    (await pathExists(path.join(appDir, 'package-lock.json'))) ||
+    (await pathExists(path.join(appDir, 'npm-shrinkwrap.json')))
+  ) {
+    return [INSTALLERS[2]];
+  }
+  return INSTALLERS;
+}
+
+async function resolveInstallerRunner(name) {
+  if (await commandExists(name)) {
+    return [name];
+  }
+  if ((name === 'pnpm' || name === 'yarn') && (await commandExists('corepack'))) {
+    return ['corepack', name];
+  }
+  return null;
 }
 
 async function findExistingPath(paths) {
