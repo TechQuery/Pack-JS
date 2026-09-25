@@ -1,0 +1,24 @@
+{
+  "name": "pack-js",
+  "version": "1.0.0",
+  "description": "Pack a JavaScript local project to a Portable Execution.",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "http://localhost:26831/TechQuery/Pack-JS"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "fast-glob": "^3.3.3",
+    "semver": "^7.8.5",
+    "zx": "^8.8.5"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.2"
+  }
+}
