@@ -74,7 +74,7 @@ export async function packProject({
   });
 
   await createLaunchers({ tmpRoot, sourcePkg, extractedNodePath, targetPlatform: normalizedPlatform });
-  await createPosixInstallScript(tmpRoot);
+  await createPosixInstallScript(tmpRoot, normalizedPlatform);
 
   const outputBaseName = outputName || packageName;
   const outputFile = path.join(
@@ -202,7 +202,7 @@ async function installNodeRuntime({ version, runtimeDir, arch, targetPlatform })
   await rm(runtimeDir, { recursive: true, force: true });
   await mkdir(runtimeDir, { recursive: true });
 
-  await extractArchive({ extension, archivePath, runtimeDir });
+  await extractArchive({ extension, archivePath, runtimeDir, targetPlatform: platform });
 
   const extractedNodePath = await resolveNodeExecutablePath(runtimeDir, distDirName, platform);
   return { archivePath, extractedNodePath };
@@ -234,8 +234,8 @@ async function createLaunchers({ tmpRoot, sourcePkg, extractedNodePath, targetPl
   }
 }
 
-async function createPosixInstallScript(tmpRoot) {
-  if (process.platform === 'win32') {
+async function createPosixInstallScript(tmpRoot, targetPlatform) {
+  if (targetPlatform === 'win') {
     return;
   }
   const installScriptPath = path.join(tmpRoot, 'install.sh');
@@ -387,13 +387,16 @@ export function getExtractionCommand(extension, platform) {
   return 'tar';
 }
 
-async function extractArchive({ extension, archivePath, runtimeDir }) {
-  const extraction = getExtractionCommand(extension, process.platform);
-  if (extraction === 'powershell-zip') {
+async function extractArchive({ extension, archivePath, runtimeDir, targetPlatform }) {
+  const extraction = getExtractionCommand(
+    extension,
+    targetPlatform === 'win' ? 'win32' : process.platform
+  );
+  if (extraction === 'powershell-zip' && (await commandExists('powershell'))) {
     await $`powershell -NoProfile -Command Expand-Archive -Path ${archivePath} -DestinationPath ${runtimeDir} -Force`;
     return;
   }
-  if (extraction === 'python-zip') {
+  if (extraction === 'powershell-zip' || extraction === 'python-zip') {
     if (await commandExists('python')) {
       await $`python -m zipfile -e ${archivePath} ${runtimeDir}`;
       return;
