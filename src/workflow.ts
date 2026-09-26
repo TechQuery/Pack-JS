@@ -3,6 +3,7 @@ import path from 'node:path';
 import { $, fs, usePowerShell } from 'zx';
 import fg from 'fast-glob';
 import semver from 'semver';
+import type { PackageJson } from 'type-fest';
 import {
   LOCK_FILES,
   TargetPlatform,
@@ -64,18 +65,6 @@ interface PackProjectInput {
   outputName?: string;
 }
 
-interface PackageJSON {
-  name?: string;
-  files?: string[];
-  engines?: { node?: string };
-  bin?: string | Record<string, string>;
-  dependencies?: Record<string, string>;
-  devDependencies?: Record<string, string>;
-  optionalDependencies?: Record<string, string>;
-  peerDependencies?: Record<string, string>;
-  workspaces?: unknown;
-}
-
 export async function packProject({
   projectFolder = process.cwd(),
   targetPlatform = process.platform,
@@ -84,10 +73,10 @@ export async function packProject({
   outputName
 }: PackProjectInput = {}) {
   const sourceFolder = path.resolve(projectFolder);
-  const sourcePkg = (await fs.readJSON(
+  const sourcePackage = (await fs.readJSON(
     path.join(sourceFolder, 'package.json')
-  )) as PackageJSON;
-  const packageName = sourcePkg.name?.trim();
+  )) as PackageJson;
+  const packageName = sourcePackage.name?.trim();
 
   if (!packageName) throw new Error('package.json name is required');
 
@@ -104,19 +93,19 @@ export async function packProject({
 
   const workspaceStage = await stageWorkspacePackage({
     sourceFolder,
-    sourcePkg,
+    sourcePackage,
     appFolder,
     installProductionDependencies
   });
   const appBasePath = workspaceStage?.appBasePath || '';
 
   if (!workspaceStage) {
-    await copyProjectFiles(sourceFolder, appFolder, sourcePkg);
+    await copyProjectFiles(sourceFolder, appFolder, sourcePackage);
     await installProductionDependencies(appFolder);
   }
 
   const version = await resolveNodeVersion({
-    sourcePkg,
+    sourcePkg: sourcePackage,
     overrideVersion: nodeVersion
   });
   const nodePath = await installNodeRuntime({
@@ -128,7 +117,7 @@ export async function packProject({
 
   await createLaunchers({
     tmpRoot,
-    sourcePkg,
+    sourcePkg: sourcePackage,
     nodePath,
     platform,
     appBasePath
@@ -156,7 +145,7 @@ export async function resolveNodeVersion({
   sourcePkg = {},
   overrideVersion
 }: {
-  sourcePkg?: PackageJSON;
+  sourcePkg?: PackageJson;
   overrideVersion?: string;
 }) {
   if (overrideVersion) return normalizeVersion(overrideVersion);
@@ -185,7 +174,7 @@ export async function resolveNodeVersion({
 async function copyProjectFiles(
   sourceFolder: string,
   appFolder: string,
-  sourcePkg: PackageJSON
+  sourcePkg: PackageJson
 ) {
   const entries = new Set(['package.json', '.npmrc', 'pnpm-workspace.yaml']);
 

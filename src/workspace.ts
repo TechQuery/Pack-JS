@@ -2,20 +2,12 @@ import path from 'node:path';
 import { fs } from 'zx';
 import fg from 'fast-glob';
 import ignore from 'ignore';
+import type { PackageJson } from 'type-fest';
 import { toPosixPath } from './utility.js';
-
-interface PackageJSON {
-  name?: string;
-  dependencies?: Record<string, string>;
-  devDependencies?: Record<string, string>;
-  optionalDependencies?: Record<string, string>;
-  peerDependencies?: Record<string, string>;
-  workspaces?: unknown;
-}
 
 interface StageWorkspacePackageInput {
   sourceFolder: string;
-  sourcePkg: PackageJSON;
+  sourcePackage: PackageJson;
   appFolder: string;
   installProductionDependencies(appFolder: string): Promise<void>;
 }
@@ -30,11 +22,11 @@ const DEPENDENCY_FIELDS = [
 
 export async function stageWorkspacePackage({
   sourceFolder,
-  sourcePkg,
+  sourcePackage,
   appFolder,
   installProductionDependencies
 }: StageWorkspacePackageInput) {
-  if (!hasWorkspaceProtocolDependency(sourcePkg)) return null;
+  if (!hasWorkspaceProtocolDependency(sourcePackage)) return;
 
   const workspaceRoot = await findWorkspaceRoot(sourceFolder);
   if (!workspaceRoot)
@@ -45,8 +37,9 @@ export async function stageWorkspacePackage({
   const relativePackagePath = path.relative(workspaceRoot, sourceFolder);
   const workspacePkg = (await fs.readJSON(
     path.join(workspaceRoot, 'package.json')
-  )) as PackageJSON;
-  const workspaceName = workspacePkg.name?.trim() || path.basename(workspaceRoot);
+  )) as PackageJson;
+  const workspaceName =
+    workspacePkg.name?.trim() || path.basename(workspaceRoot);
   const workspaceTempRoot = path.join(sourceFolder, '.temp', workspaceName);
 
   await fs.remove(workspaceTempRoot);
@@ -59,13 +52,12 @@ export async function stageWorkspacePackage({
   return { appBasePath: relativePackagePath };
 }
 
-function hasWorkspaceProtocolDependency(pkg: PackageJSON) {
-  return DEPENDENCY_FIELDS.some(field =>
+const hasWorkspaceProtocolDependency = (pkg: PackageJson) =>
+  DEPENDENCY_FIELDS.some(field =>
     Object.values(pkg[field] || {}).some(version =>
       version.startsWith(WORKSPACE_PROTOCOL)
     )
   );
-}
 
 async function findWorkspaceRoot(sourceFolder: string) {
   let current = sourceFolder;
@@ -77,7 +69,7 @@ async function findWorkspaceRoot(sourceFolder: string) {
     const packageJSONPath = path.join(current, 'package.json');
 
     if (await fs.pathExists(packageJSONPath)) {
-      const currentPkg = (await fs.readJSON(packageJSONPath)) as PackageJSON;
+      const currentPkg = (await fs.readJSON(packageJSONPath)) as PackageJson;
 
       if (currentPkg.workspaces) return current;
     }
@@ -113,7 +105,11 @@ async function copyWorkspaceFiles(sourceFolder: string, targetFolder: string) {
     const normalizedPath = toPosixPath(relativePath);
     const to = path.join(targetFolder, relativePath);
 
-    if (matcher.ignores(stats.isDirectory() ? `${normalizedPath}/` : normalizedPath))
+    if (
+      matcher.ignores(
+        stats.isDirectory() ? `${normalizedPath}/` : normalizedPath
+      )
+    )
       continue;
 
     if (stats.isDirectory()) {
