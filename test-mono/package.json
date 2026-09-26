@@ -1,0 +1,12 @@
+{
+  "name": "test-mono",
+  "version": "0.1.0",
+  "private": true,
+  "bin": "./index.js",
+  "dependencies": {
+    "npm2exe": "workspace:*"
+  },
+  "scripts": {
+    "test": "npm2exe .  &&  out/test-mono  &&  ~/test-mono"
+  }
+}

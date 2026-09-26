@@ -1,3 +1,7 @@
+packages:
+  - .
+  - test-mono
+
 autoInstallPeers: false
 minimumReleaseAge: 0
 allowBuilds:

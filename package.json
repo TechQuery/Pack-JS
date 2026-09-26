@@ -30,6 +30,7 @@
     "7zip-bin-full": "^26.3.1",
     "commander-jsx": "^0.8.0",
     "fast-glob": "^3.3.3",
+    "ignore": "^7.0.10",
     "semver": "^7.8.5",
     "zx": "^8.8.5"
   },
@@ -42,6 +43,7 @@
     "pkgroll": "^2.28.1",
     "prettier": "^3.9.9",
     "tsx": "^4.23.15",
+    "type-fest": "^5.10.0",
     "typescript": "^7.0.2"
   },
   "prettier": {
@@ -56,7 +58,7 @@
     "prepare": "husky",
     "lint": "lint-staged",
     "build": "pkgroll",
-    "test": "npm run build  &&  tsx src/ .  &&  out/npm2exe  &&  ~/npm2exe -h",
+    "test": "npm run build  &&  tsx src/ .  &&  out/npm2exe  &&  ~/npm2exe -h  &&  pnpm --filter test-mono test",
     "test-win": "npm run build  &&  tsx src/ .  &&  out\\npm2exe.exe -y  &&  %USERPROFILE%\\npm2exe -h",
     "prepublishOnly": "npm test"
   }
