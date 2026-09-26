@@ -14,6 +14,7 @@ import {
   toPosixPath,
   toWindowsPath
 } from './utility.js';
+import { stageWorkspacePackage } from './workspace.js';
 
 if (process.platform === 'win32')
   if (typeof $.shell === 'string')
@@ -68,6 +69,11 @@ interface PackageJSON {
   files?: string[];
   engines?: { node?: string };
   bin?: string | Record<string, string>;
+  dependencies?: Record<string, string>;
+  devDependencies?: Record<string, string>;
+  optionalDependencies?: Record<string, string>;
+  peerDependencies?: Record<string, string>;
+  workspaces?: unknown;
 }
 
 export async function packProject({
@@ -96,8 +102,18 @@ export async function packProject({
   await fs.ensureDir(appFolder);
   await fs.ensureDir(outFolder);
 
-  await copyProjectFiles(sourceFolder, appFolder, sourcePkg);
-  await installProductionDependencies(appFolder);
+  const workspaceStage = await stageWorkspacePackage({
+    sourceFolder,
+    sourcePkg,
+    appFolder,
+    installProductionDependencies
+  });
+  const appBasePath = workspaceStage?.appBasePath || '';
+
+  if (!workspaceStage) {
+    await copyProjectFiles(sourceFolder, appFolder, sourcePkg);
+    await installProductionDependencies(appFolder);
+  }
 
   const version = await resolveNodeVersion({
     sourcePkg,
@@ -110,7 +126,13 @@ export async function packProject({
     arch: runtimeArch
   });
 
-  await createLaunchers({ tmpRoot, sourcePkg, nodePath, platform });
+  await createLaunchers({
+    tmpRoot,
+    sourcePkg,
+    nodePath,
+    platform,
+    appBasePath
+  });
   if (platform !== 'win') await createInstallScript(tmpRoot);
 
   const outputBaseName = outputName || packageName;
@@ -345,12 +367,14 @@ async function createLaunchers({
   tmpRoot,
   sourcePkg,
   nodePath,
-  platform
+  platform,
+  appBasePath = ''
 }: {
   tmpRoot: string;
   sourcePkg: PackageJSON;
   nodePath: string;
   platform: TargetPlatform;
+  appBasePath?: string;
 }) {
   if (!sourcePkg.bin) return;
 
@@ -372,7 +396,7 @@ async function createLaunchers({
   for (const [name, target] of entries) {
     const targetRelativePath = path.relative(
       archiveRoot,
-      path.join(tmpRoot, 'app', target)
+      path.join(tmpRoot, 'app', appBasePath, target)
     );
 
     if (platform === 'win') {
