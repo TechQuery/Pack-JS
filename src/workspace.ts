@@ -111,11 +111,17 @@ async function copyWorkspaceFiles(sourceFolder: string, targetFolder: string) {
     const from = path.join(sourceFolder, relativePath);
     const stats = await fs.lstat(from);
     const normalizedPath = toPosixPath(relativePath);
+    const to = path.join(targetFolder, relativePath);
 
     if (matcher.ignores(stats.isDirectory() ? `${normalizedPath}/` : normalizedPath))
       continue;
 
-    await fs.copy(from, path.join(targetFolder, relativePath));
+    if (stats.isDirectory()) {
+      await fs.ensureDir(to);
+      continue;
+    }
+
+    await fs.copy(from, to);
   }
 }
 
