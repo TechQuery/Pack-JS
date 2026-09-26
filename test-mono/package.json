@@ -7,6 +7,6 @@
     "npm2exe": "workspace:*"
   },
   "scripts": {
-    "test": "npm2exe ."
+    "test": "npm2exe .  &&  out/test-mono  &&  ~/test-mono"
   }
 }

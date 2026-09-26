@@ -29,85 +29,30 @@ Options:
 
 ## Compared with Node SEA / pkg / nexe / caxa
 
-| Tool | CPU / OS compatibility | Node.js version support | Entry file format / count | Monorepo support | Installed app structure | Native binary module compatibility | Config complexity | Executable wrapping form |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| **npm2exe** | `linux`, `darwin`, `win`; `x64`, `arm64`, `armv7l`, plus Windows `x86`.[9][10] | Build with Node `>=22`; bundled runtime comes from `engines.node`, `--node-version`, or latest official release.[9][10] | Reads `package.json#bin`; supports one or many launchers.[10] | Explicitly handles `workspace:` dependencies by staging the workspace root first.[11] | Installs launchers into the user home/profile, with app files under `npm2exe-apps/<name>/app` and runtime under `npm2exe-apps/<name>/runtime`.[10] | Runs extracted files with a stock Node runtime, so native addons follow normal on-disk loading.[10] | Low: usually just project path plus optional CLI flags.[3][12] | Windows uses 7z SFX; Linux/macOS use `makeself` self-extractors.[10] |
-| **Node SEA**[4] | Uses a stock `node` binary; cross-platform SEA generation is documented, with caveats for code cache and snapshots.[4] | SEA landed in Node `18.16+`; direct `node --build-sea` is documented in newer Node releases.[4] | Exactly one `main` script in `commonjs` or `module` format.[4] | No workspace-specific flow is documented; you package one prepared entry bundle at a time.[4] | No install tree by default; optional assets can live in a read-only VFS inside the executable.[4] | `.node` addons must be extracted to the real filesystem before loading.[4] | Medium: JSON config plus optional assets, VFS, snapshot, and code-cache settings.[4] | A stock Node executable with an injected SEA blob.[4] |
-| **pkg**[5][6][7][8] | Targets Linux, macOS, Windows, Alpine, and static Linux variants; docs describe cross-OS and cross-arch targets.[6] | Current docs target Node 22 / 24 / latest, and require Node `>=22` on the build host.[5][6] | Usually one entry from `pkg .` or `pkg <entry>`, following `package.json#bin`.[5] | No dedicated workspace staging is documented; config centers on one package root plus optional asset rules.[7] | Standard mode uses an embedded snapshot filesystem; native addons are extracted to cache on disk.[8] | Native addons are supported, but `linuxstatic` excludes native bindings.[6][8] | Medium to high: auto-detection plus `package.json`, `.pkgrc`, or JS config hooks.[7] | Standard mode uses a patched runtime; SEA mode uses stock Node SEA.[5][8] |
-| **nexe**[13] | Targets Windows, macOS, Linux, and Alpine via `platform-arch-version` target strings.[13] | The packager runs on Node `>=10`; target runtime version is chosen per build and may require prebuilt assets or source builds.[13] | One input entry file or stdin bundle, plus optional resource globs.[13] | No reviewed workspace-specific packaging flow is documented.[13] | Produces one executable with a virtual filesystem by default.[13] | Native binaries must be shipped next to the output binary.[13] | Medium to high: many CLI/API options plus optional patch/build pipelines.[13] | A single compiled executable built from downloaded or source-built Node bases.[13] |
-| **caxa**[14] | Supports Windows, macOS, and Linux, but its docs explicitly say it is not a general cross-compilation solution for bundling the right Node runtime from another OS/arch.[14] | Current packager requires Node `>=22.15.0`.[14] | Runs a command array against an extracted payload; one input tree can emit multiple targets.[14] | No workspace-specific staging is documented, but it can package any prepared directory tree.[14] | Extracts the payload to a temp/cache directory, then starts the bundled Node runtime from there.[14] | README states native modules are supported because the app tree is extracted to disk first.[14] | Low to medium: one CLI command for the common case, more flags for custom stubs/compression/targets.[14] | A Rust self-extracting stub plus compressed payload, footer, and trailer.[14] |
+| Feature          | npm2exe                                                                        | Node SEA                             | pkg                                                     | nexe                                      | caxa                                        |
+| ---------------- | ------------------------------------------------------------------------------ | ------------------------------------ | ------------------------------------------------------- | ----------------------------------------- | ------------------------------------------- |
+| OS / CPU         | [✅ `linux` / `darwin` / `win`; `x64` / `arm64` / `armv7l`; Windows `x86`][10] | [✅ stock Node target][4]            | [✅ Linux / macOS / Windows / Alpine / static Linux][6] | [✅ target triple][13]                    | [✅ Windows / macOS / Linux][14]            |
+| Node version     | [✅ build `>=22`; runtime auto-resolved or overridden][9][10]                  | [✅ Node SEA in official Node][4]    | [✅ build `>=22`; `node22` / `node24` / `latest`][5][6] | [✅ runtime version in target string][13] | [✅ build `>=22.15.0`][14]                  |
+| Entry model      | [✅ `package.json#bin`, one or many launchers][10]                             | [⚠️ one `main` only][4]              | [⚠️ one package entry][5]                               | [⚠️ one input or stdin bundle][13]        | [✅ command array; multi-target output][14] |
+| Monorepo         | [✅ `workspace:` staging][11]                                                  | [❓ no dedicated flow documented][4] | [❓ no dedicated flow documented][7]                    | [❓ no dedicated flow documented][13]     | [❓ no dedicated flow documented][14]       |
+| Installed layout | [✅ real app tree in home/profile][10]                                         | [⚠️ in-binary VFS][4]                | [⚠️ snapshot FS + cache extraction][8]                  | [⚠️ single executable VFS][13]            | [✅ extracted app tree in temp/cache][14]   |
+| Native addons    | [✅ normal on-disk loading][10]                                                | [⚠️ must extract first][4]           | [⚠️ supported, but extracted to cache][8]               | [❌ ship beside binary][13]               | [✅ extracted before run][14]               |
+| Config           | [✅ low][3][12]                                                                | [⚠️ medium][4]                       | [⚠️ medium / high][7]                                   | [⚠️ medium / high][13]                    | [⚠️ low / medium][14]                       |
+| Wrapper form     | [✅ 7z SFX / `makeself`][10]                                                   | [⚠️ injected stock Node binary][4]   | [⚠️ patched runtime or SEA][5][8]                       | [⚠️ compiled single executable][13]       | [⚠️ Rust self-extractor][14]                |
 
-The main trade-off is that **SEA / pkg / nexe** optimize harder for a single executable image, while **caxa / npm2exe** are more transparent about shipping and executing a real extracted app tree. That makes `npm2exe` especially practical for packages that already depend on regular Node.js filesystem behavior, production installs, and now `workspace:` mono repos.[4][8][10][11][13][14]
+In short: **SEA / pkg / nexe** lean toward a tighter single-binary image, while **caxa / npm2exe** lean toward extracting and running a real app tree. That makes `npm2exe` especially friendly to regular Node.js install behavior and `workspace:` monorepos.[4][10][11][13][14]
 
 ## Copyable GitHub Actions release workflow
 
-Copy `/examples/release-on-tag.yml` into your own repository, then replace the package install/build steps and `asset_name` values to match your app.[15]
+```shell
+cd path/to/your/project
 
-This example assumes your project already has a working `package.json#bin`, and that `npm run build` prepares the app before packaging:
-
-```yaml
-name: Release portable binaries
-
-on:
-  push:
-    tags:
-      - 'v*'
-
-permissions:
-  contents: write
-
-jobs:
-  build:
-    name: Build ${{ matrix.label }}
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: ubuntu-latest
-            label: linux-x64
-            asset_name: my-app-linux-x64
-            asset_path: out/my-app-linux-x64
-          - os: macos-latest
-            label: macos
-            asset_name: my-app-macos
-            asset_path: out/my-app-macos
-          - os: windows-latest
-            label: windows-x64
-            asset_name: my-app-windows-x64
-            asset_path: out/my-app-windows-x64.exe
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 24
-          cache: npm
-
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Build project
-        run: npm run build
-
-      - name: Package with npm2exe
-        if: runner.os != 'Windows'
-        run: npx npm2exe@latest . --output "${{ matrix.asset_name }}"
-
-      - name: Package with npm2exe on Windows
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: npx npm2exe@latest . --output "${{ matrix.asset_name }}"
-
-      - uses: softprops/action-gh-release@v2
-        with:
-          files: ${{ matrix.asset_path }}
-          generate_release_notes: true
+npx git-utility download https://github.com/idea2app/npm2exe main examples/ .github/workflow/
 ```
 
 Notes:
 
+- The downloaded workflow example keeps a single packaging step, so no per-OS `shell` switching is needed.[15]
 - Build on each native runner instead of cross-packaging from one host, because `npm2exe` currently uses different wrapping backends for Windows and POSIX targets.[10]
 - Linux/macOS outputs are self-extracting shell archives; Windows output is a self-extracting `.exe`.[10]
 - The release asset is the installer wrapper. The final launcher gets installed into the user home/profile when the asset is executed.[10]
@@ -127,4 +72,4 @@ Notes:
 [12]: https://github.com/idea2app/npm2exe/blob/master/src/index.tsx
 [13]: https://github.com/nexe/nexe/blob/master/README.md
 [14]: https://github.com/cdxgen/caxa/blob/main/README.md
-[15]: https://github.com/idea2app/npm2exe/blob/master/examples/release-on-tag.yml
+[15]: https://github.com/idea2app/npm2exe/blob/master/.github/workflow/release-on-tag.yml

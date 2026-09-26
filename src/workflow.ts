@@ -82,30 +82,30 @@ export async function packProject({
 
   const platform = normalizePlatform(targetPlatform);
   const runtimeArch = normalizeArch(arch, platform);
-  const tmpRoot = path.join(sourceFolder, '.temp/npm2exe-apps', packageName);
-  const appFolder = path.join(tmpRoot, 'app');
-  const runtimeFolder = path.join(tmpRoot, 'runtime');
-  const outFolder = path.join(sourceFolder, 'out');
+  const tempRoot = path.join(sourceFolder, '.temp/npm2exe-apps', packageName);
+  const appFolder = path.join(tempRoot, 'app');
+  const runtimeFolder = path.join(tempRoot, 'runtime');
+  const outputFolder = path.join(sourceFolder, 'out');
 
-  await fs.remove(tmpRoot);
+  await fs.remove(tempRoot);
   await fs.ensureDir(appFolder);
-  await fs.ensureDir(outFolder);
+  await fs.ensureDir(outputFolder);
 
-  const workspaceStage = await stageWorkspacePackage({
+  const stagedWorkspacePackage = await stageWorkspacePackage({
     sourceFolder,
     sourcePackage,
     appFolder,
+    copyProjectFiles,
     installProductionDependencies
   });
-  const appBasePath = workspaceStage?.appBasePath || '';
 
-  if (!workspaceStage) {
+  if (!stagedWorkspacePackage) {
     await copyProjectFiles(sourceFolder, appFolder, sourcePackage);
     await installProductionDependencies(appFolder);
   }
 
   const version = await resolveNodeVersion({
-    sourcePkg: sourcePackage,
+    sourcePackage,
     overrideVersion: nodeVersion
   });
   const nodePath = await installNodeRuntime({
@@ -116,17 +116,16 @@ export async function packProject({
   });
 
   await createLaunchers({
-    tmpRoot,
-    sourcePkg: sourcePackage,
+    tempRoot,
+    sourcePackage,
     nodePath,
-    platform,
-    appBasePath
+    platform
   });
-  if (platform !== 'win') await createInstallScript(tmpRoot);
+  if (platform !== 'win') await createInstallScript(tempRoot);
 
   const outputBaseName = outputName || packageName;
   const outputFile = path.join(
-    outFolder,
+    outputFolder,
     platform === 'win' ? `${outputBaseName}.exe` : outputBaseName
   );
 
@@ -134,18 +133,18 @@ export async function packProject({
     await packageWith7Zip(path.join(sourceFolder, '.temp'), outputFile);
   } else {
     const archiveRoot = path.join(sourceFolder, '.temp');
-    const installScript = `./${toPosixPath(path.relative(archiveRoot, path.join(tmpRoot, 'install.sh')))}`;
+    const installScript = `./${toPosixPath(path.relative(archiveRoot, path.join(tempRoot, 'install.sh')))}`;
 
     await packageWithMakeself(archiveRoot, outputFile, installScript);
   }
-  return { outputFile, packageName, tmpRoot, runtimeVersion: version };
+  return { outputFile, packageName, tempRoot, runtimeVersion: version };
 }
 
 export async function resolveNodeVersion({
-  sourcePkg = {},
+  sourcePackage = {},
   overrideVersion
 }: {
-  sourcePkg?: PackageJson;
+  sourcePackage?: PackageJson;
   overrideVersion?: string;
 }) {
   if (overrideVersion) return normalizeVersion(overrideVersion);
@@ -155,7 +154,7 @@ export async function resolveNodeVersion({
     throw new Error(`Failed to fetch node versions: ${response.status}`);
 
   const index = (await response.json()) as { version: string }[];
-  const range = sourcePkg.engines?.node;
+  const range = sourcePackage.engines?.node;
   if (range) {
     const matched = semver.maxSatisfying(
       index.map(({ version }) => version),
@@ -174,7 +173,7 @@ export async function resolveNodeVersion({
 async function copyProjectFiles(
   sourceFolder: string,
   appFolder: string,
-  sourcePkg: PackageJson
+  sourcePackage: PackageJson
 ) {
   const entries = new Set(['package.json', '.npmrc', 'pnpm-workspace.yaml']);
 
@@ -183,8 +182,8 @@ async function copyProjectFiles(
       entries.add(lockFile);
 
   const patterns =
-    Array.isArray(sourcePkg.files) && sourcePkg.files.length > 0
-      ? sourcePkg.files
+    Array.isArray(sourcePackage.files) && sourcePackage.files.length > 0
+      ? sourcePackage.files
       : ['**/*'];
   for (const item of await fg(patterns, {
     cwd: sourceFolder,
@@ -353,29 +352,27 @@ async function extractArchive({
 }
 
 async function createLaunchers({
-  tmpRoot,
-  sourcePkg,
+  tempRoot,
+  sourcePackage,
   nodePath,
-  platform,
-  appBasePath = ''
+  platform
 }: {
-  tmpRoot: string;
-  sourcePkg: PackageJSON;
+  tempRoot: string;
+  sourcePackage: PackageJson;
   nodePath: string;
   platform: TargetPlatform;
-  appBasePath?: string;
 }) {
-  if (!sourcePkg.bin) return;
+  if (!sourcePackage.bin) return;
 
   const entries =
-    typeof sourcePkg.bin === 'string'
-      ? [[sourcePkg.name || 'app', sourcePkg.bin]]
-      : Object.entries(sourcePkg.bin);
-  const archiveRoot = path.join(tmpRoot, '../..');
+    typeof sourcePackage.bin === 'string'
+      ? [[sourcePackage.name || 'app', sourcePackage.bin]]
+      : Object.entries(sourcePackage.bin);
+  const archiveRoot = path.join(tempRoot, '../..');
   const nodeRelativePath = path.relative(archiveRoot, nodePath);
   const nodeModulesRelativePath = path.relative(
     archiveRoot,
-    path.join(tmpRoot, 'app/node_modules')
+    path.join(tempRoot, 'app/node_modules')
   );
   const runtimeBinRelativePath = path.relative(
     archiveRoot,
@@ -385,7 +382,7 @@ async function createLaunchers({
   for (const [name, target] of entries) {
     const targetRelativePath = path.relative(
       archiveRoot,
-      path.join(tmpRoot, 'app', appBasePath, target)
+      path.join(tempRoot, 'app', target)
     );
 
     if (platform === 'win') {
@@ -420,8 +417,8 @@ exec "$ROOT_DIR/${toPosixPath(nodeRelativePath)}" "$ROOT_DIR/${toPosixPath(targe
   }
 }
 
-async function createInstallScript(tmpRoot: string) {
-  const scriptPath = path.join(tmpRoot, 'install.sh');
+async function createInstallScript(tempRoot: string) {
+  const scriptPath = path.join(tempRoot, 'install.sh');
   await fs.outputFile(
     scriptPath,
     `#!/bin/sh
@@ -452,7 +449,7 @@ async function installMakeself() {
 }
 
 async function packageWithMakeself(
-  tmpRoot: string,
+  tempRoot: string,
   outputFile: string,
   installScript: string
 ) {
@@ -466,7 +463,7 @@ async function packageWithMakeself(
   )
     await installMakeself();
 
-  await $`${makeselfPath} --nocomp --target '$HOME' ${tmpRoot} ${outputFile} "npm2exe bundle" ${installScript}`;
+  await $`${makeselfPath} --nocomp --target '$HOME' ${tempRoot} ${outputFile} "npm2exe bundle" ${installScript}`;
 }
 
 async function installSFXModule() {
@@ -486,14 +483,14 @@ async function installSFXModule() {
   return sfxPath;
 }
 
-async function packageWith7Zip(tmpRoot: string, outputFile: string) {
+async function packageWith7Zip(tempRoot: string, outputFile: string) {
   const { path7z } = await import('7zip-bin-full');
   const sfxPath = await installSFXModule();
   const archivePath = path.join(os.tmpdir(), 'npm2exe-archive.7z');
 
   // 7zSD.sfx extracts to a temporary folder, runs this script there, then removes the folder
   await fs.outputFile(
-    path.join(tmpRoot, 'install.cmd'),
+    path.join(tempRoot, 'install.cmd'),
     `@echo off
 robocopy "%~dp0." "%USERPROFILE%" /E /XF install.cmd /NFL /NDL /NJH /NJS
 if %ERRORLEVEL% GEQ 8 exit /b %ERRORLEVEL%
@@ -503,7 +500,7 @@ exit /b 0
   );
   await fs.remove(archivePath);
   await $({
-    cwd: tmpRoot
+    cwd: tempRoot
   })`${path7z} a -t7z -mx=9 ${archivePath} .`;
 
   const config = `;!@Install@!UTF-8!
